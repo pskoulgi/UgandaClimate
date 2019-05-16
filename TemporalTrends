@@ -113,6 +113,7 @@ var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"],
   "min":-54.47085296630859,"max":44.887616271972654,"gamma":1};
 Map.addLayer(regrCoeffs.select('time_SoilMoi00_10cm_tavg_mean_djf').clip(ugandaBuffered),
   visParam, 'time_SoilMoi00_10cm_tavg_mean_djf');
+Map.centerObject(ugandaBuffered);
 
 // Find CRS and nominal scale of original images
 print(ee.Image(fldas.first()).projection(), 'original projection');
