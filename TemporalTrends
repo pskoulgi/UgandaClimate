@@ -1,0 +1,130 @@
+// ------------------------- UTILITY FUNCTIONS --------------------------------
+
+// Append a tag to band names of an image
+// Used to tag seasonal composites with a id tag
+// inputs: image, string
+// returns: image
+function appendSeasonTag(im, tag) {
+  var bands = im.bandNames();
+  var tagged = bands.map(function(n) {
+    return ee.String(n).cat('_').cat(tag);
+  })
+  return im.select(bands, tagged);
+}
+
+// Compute a season's composites (mean, max, min, max-min) in a year.
+// Given a image collection for a year, split it into a 3 month season based on given mid month
+// Compute composites and add a season id tag to the bands
+// inputs: image collection (containing 1 year's images), season's mid month (ee.Date), string
+// returns: image
+
+function seasonalComposites(coll, seasonMidMonth, seasonTag) {
+  var season = coll.filter(ee.Filter.date(seasonMidMonth.advance(-1, 'month'),
+                                          seasonMidMonth.advance(+1, 'month')));
+  var season_mean = appendSeasonTag(season.reduce(ee.Reducer.mean()), seasonTag);
+  var season_max  = appendSeasonTag(season.reduce(ee.Reducer.max()),  seasonTag);
+  var season_min  = appendSeasonTag(season.reduce(ee.Reducer.min()),  seasonTag);
+  var season_maxMinusMin = appendSeasonTag(season.max().subtract(season.min()),
+                                           'maxMinusMin_'+seasonTag);
+  return ee.Image.cat(season_mean, season_max, season_min, season_maxMinusMin);
+}
+
+// Compute composites of all seasons in a year
+// Computed season by season, with each band-season as a separate band
+// input: year
+// return: image
+function yearlyComposites(y) {
+  var djf_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 1, 1), 'djf');
+  var mam_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 4, 1), 'mam');
+  var jja_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 7, 1), 'jja');
+  var son_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 10, 1), 'son');
+  var ond_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 11, 1), 'ond');
+  
+  return ee.Image.cat(djf_comps, mam_comps, jja_comps, son_comps, ond_comps)
+           .set('system:time_start', ee.Date.fromYMD(y, 1, 1).millis(),
+                'year', y);
+}
+
+// ------------------------- PROCESSING -------------------------------------
+
+// Find Uganda boundary and add buffer
+var uganda = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_co', 'UG'))
+  .aside(Map.addLayer)
+  .first();
+var ugandaBuffered = ee.Feature(uganda).buffer(3e5); // 300km buffer
+
+// Get relevant FLDAS data
+// More info:https://developers.google.com/earth-engine/datasets/catalog/NASA_FLDAS_NOAH01_C_GL_M_V001
+var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
+  .filter(ee.Filter.date('1982-01-01', '2018-12-31')) // 2019 is not yet complete
+  // Select soil surface moisture, surface runoff, 
+  // surface radiative temperature, near surface air temperature
+  .select(['SoilMoi00_10cm_tavg', 'Qs_tavg', 'RadT_tavg', 'Tair_f_tavg']);
+
+// Years for which data are available
+var imYears = ee.List(fldas.aggregate_array('system:time_start'))
+  .map(function(t) {
+    return ee.Date(t).get('year');
+  })
+  .distinct();
+
+// Create time series of composites
+var timeSeries = ee.ImageCollection.fromImages(imYears.map(yearlyComposites))
+  .aside(print, 'yearly composites')
+  // add a constant and time band, in preparation of regression
+  .map(function(im) {
+    return ee.Image(1)
+             .float() // to keep band data types consistent
+             .addBands(im.metadata('system:time_start').divide(1e15)
+                         .float() // to keep band data types consistent
+                         .rename('time'))
+             .addBands(im)
+             .copyProperties(im, ['system:time_start', 'year']);
+  })
+  .aside(print, 'yearly composites, time & constant added');
+
+var predVars = ee.Image(timeSeries.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+var respVars = ee.Image(timeSeries.first()).bandNames()
+  .slice(2);    // rest all are response vars
+
+// Perform regression. All response variables handled at once.
+var temporalRegr = timeSeries.reduce(ee.Reducer.linearRegression(predVars.size(), respVars.size()))
+  .aside(print, 'regression output');
+
+// Regression result (coefficients) is array image that must be flattened.
+// These lists label the information along each axis of the arrays.
+// From eg. at https://developers.google.com/earth-engine/reducers_regression
+var bandNames = [predVars,  // 0-axis variation.
+                 respVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands,
+// in a multi-band image according to the labels
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var regrCoeffs = temporalRegr.select(['coefficients']).arrayFlatten(bandNames)
+  .aside(print, 'regression output flattened');
+
+// ------------------------- DISPLAY & EXPORT -----------------------------------
+
+// Displaying a coefficient image
+var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"],
+  "min":-54.47085296630859,"max":44.887616271972654,"gamma":1};
+Map.addLayer(regrCoeffs.select('time_SoilMoi00_10cm_tavg_mean_djf').clip(ugandaBuffered),
+  visParam, 'time_SoilMoi00_10cm_tavg_mean_djf');
+
+// Find CRS and nominal scale of original images
+print(ee.Image(fldas.first()).projection(), 'original projection');
+var expCRS = ee.Image(fldas.first()).projection().crs().getInfo();
+var expScl = ee.Image(fldas.first()).projection().nominalScale().getInfo();
+
+// Export to drive
+Export.image.toDrive({
+  image: regrCoeffs.clip(ugandaBuffered),
+  description: 'UgandaClimVarsRegr',
+  fileNamePrefix: 'UgandaClimVarsRegr',
+  region: ugandaBuffered.bounds(), 
+  scale: expScl,
+  crs: expCRS
+});
