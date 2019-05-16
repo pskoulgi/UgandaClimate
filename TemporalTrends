@@ -8,7 +8,7 @@ function appendSeasonTag(im, tag) {
   var bands = im.bandNames();
   var tagged = bands.map(function(n) {
     return ee.String(n).cat('_').cat(tag);
-  })
+  });
   return im.select(bands, tagged);
 }
 
