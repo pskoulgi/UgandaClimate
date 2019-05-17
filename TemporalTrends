@@ -109,8 +109,8 @@ var regrCoeffs = temporalRegr.select(['coefficients']).arrayFlatten(bandNames)
 // ------------------------- DISPLAY & EXPORT -----------------------------------
 
 // Displaying a coefficient image
-var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"],
-  "min":-54.47085296630859,"max":44.887616271972654,"gamma":1};
+var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"], palette: ['red', 'grey', 'blue'],
+  "min":-54.47085296630859,"max":54};
 Map.addLayer(regrCoeffs.select('time_SoilMoi00_10cm_tavg_mean_djf').clip(ugandaBuffered),
   visParam, 'time_SoilMoi00_10cm_tavg_mean_djf');
 Map.centerObject(ugandaBuffered);
