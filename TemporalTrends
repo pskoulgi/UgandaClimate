@@ -45,6 +45,30 @@ function yearlyComposites(y) {
                 'year', y);
 }
 
+// Find list of years the collection has data for
+// input: collection
+// output: list
+function extractYears(coll) {
+  return ee.List(coll.aggregate_array('system:time_start'))
+    .map(function(t) {return ee.Date(t).get('year')})
+    .distinct();
+}
+
+// (Pre-)Append a constant and time band to an image
+// Mapping this over an image collection prepares it for linear regression vs. time
+// input: image
+// output: image
+function appendConstNTimeBands(im) {
+    return ee.Image(1)
+             .float() // to keep band data types consistent
+             .addBands(im.metadata('system:time_start').divide(1e15)
+                         .float() // to keep band data types consistent
+                         .rename('time'))
+             .addBands(im)
+             .copyProperties(im, ['system:time_start', 'year']);
+}
+
+
 // ------------------------- PROCESSING -------------------------------------
 
 // Find Uganda boundary and add buffer
@@ -63,25 +87,13 @@ var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
   .select(['SoilMoi00_10cm_tavg', 'Qs_tavg', 'RadT_tavg', 'Tair_f_tavg']);
 
 // Years for which data are available
-var imYears = ee.List(fldas.aggregate_array('system:time_start'))
-  .map(function(t) {
-    return ee.Date(t).get('year');
-  })
-  .distinct();
+var imYears = extractYears(fldas);
 
 // Create time series of composites
 var timeSeries = ee.ImageCollection.fromImages(imYears.map(yearlyComposites))
   .aside(print, 'yearly composites')
   // add a constant and time band, in preparation of regression
-  .map(function(im) {
-    return ee.Image(1)
-             .float() // to keep band data types consistent
-             .addBands(im.metadata('system:time_start').divide(1e15)
-                         .float() // to keep band data types consistent
-                         .rename('time'))
-             .addBands(im)
-             .copyProperties(im, ['system:time_start', 'year']);
-  })
+  .map(appendConstNTimeBands)
   .aside(print, 'yearly composites, time & constant added');
 
 var predVars = ee.Image(timeSeries.first()).bandNames()
