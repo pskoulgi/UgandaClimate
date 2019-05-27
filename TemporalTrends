@@ -29,20 +29,22 @@ function seasonalComposites(coll, seasonMidMonth, seasonTag) {
   return ee.Image.cat(season_mean, season_max, season_min, season_maxMinusMin);
 }
 
-// Compute composites of all seasons in a year
+// Compute composites of all seasons, for each year in a list on the image collection
 // Computed season by season, with each band-season as a separate band
-// input: year
-// return: image
-function yearlyComposites(y) {
-  var djf_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 1, 1), 'djf');
-  var mam_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 4, 1), 'mam');
-  var jja_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 7, 1), 'jja');
-  var son_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 10, 1), 'son');
-  var ond_comps = seasonalComposites(fldas, ee.Date.fromYMD(y, 11, 1), 'ond');
-  
-  return ee.Image.cat(djf_comps, mam_comps, jja_comps, son_comps, ond_comps)
-           .set('system:time_start', ee.Date.fromYMD(y, 1, 1).millis(),
-                'year', y);
+// input: list of years, collection
+// return: image collection
+function yearlyComposites(years, coll) {
+  return ee.ImageCollection.fromImages(years.map(function(y) {
+    var djf_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 1, 1), 'djf');
+    var mam_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 4, 1), 'mam');
+    var jja_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 7, 1), 'jja');
+    var son_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 10, 1), 'son');
+    var ond_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 11, 1), 'ond');
+    
+    return ee.Image.cat(djf_comps, mam_comps, jja_comps, son_comps, ond_comps)
+             .set('system:time_start', ee.Date.fromYMD(y, 1, 1).millis(),
+                  'year', y);
+  }));
 }
 
 // Find list of years the collection has data for
@@ -90,7 +92,7 @@ var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
 var imYears = extractYears(fldas);
 
 // Create time series of composites
-var timeSeries = ee.ImageCollection.fromImages(imYears.map(yearlyComposites))
+var timeSeries = yearlyComposites(imYears, fldas)
   .aside(print, 'yearly composites')
   // add a constant and time band, in preparation of regression
   .map(appendConstNTimeBands)
