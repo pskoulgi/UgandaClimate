@@ -143,3 +143,50 @@ Export.image.toDrive({
   scale: expScl,
   crs: expCRS
 });
+
+////////////// Terra Climate ///////////////////
+
+var terraClim = ee.ImageCollection('IDAHO_EPSCOR/TERRACLIMATE')
+  .filter(ee.Filter.date('1979-01-01', '2018-12-31')) // 2018 not available
+  .select(['aet', 'def', 'pdsi', 'pet', 'pr', 'ro', 'soil', 'tmmn', 'tmmx']);
+
+var terraClimCRS = ee.Image(terraClim.first()).projection().crs().getInfo();
+var terraClimScl = ee.Image(terraClim.first()).projection().nominalScale().getInfo();
+
+// Years for which data are available
+var terraClimYears = extractYears(terraClim);
+
+// time series of composites
+var terraClimTimeSeries = yearlyComposites(terraClimYears, terraClim)
+  .map(appendConstNTimeBands);
+
+var terraClimPredVars = ee.Image(terraClimTimeSeries.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+var terraClimRespVars = ee.Image(terraClimTimeSeries.first()).bandNames()
+  .slice(2);    // rest all are response vars
+
+// Perform regression. All response variables handled at once.
+var terraClimRegr = terraClimTimeSeries
+  .reduce(ee.Reducer.linearRegression(terraClimPredVars.size(), terraClimRespVars.size()))
+  .aside(print, 'terraClim regression output');
+
+// Flatten regression result (coefficients) array image - band names
+var terraClimRegrResBandNames = [terraClimPredVars,  // 0-axis variation.
+                                 terraClimRespVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands,
+// in a multi-band image according to the labels
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var terraClimRegrCoeffs = terraClimRegr.select(['coefficients']).arrayFlatten(terraClimRegrResBandNames)
+  .aside(print, 'terraClimregression output flattened');
+
+// Export to drive
+Export.image.toDrive({
+  image: terraClimRegrCoeffs.clip(ugandaBuffered),
+  description: 'UgandaTerraClimRegr',
+  fileNamePrefix: 'UgandaTerraClimRegr',
+  region: ugandaBuffered.bounds(), 
+  scale: terraClimScl,
+  crs: terraClimCRS
+});
