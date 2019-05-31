@@ -70,6 +70,24 @@ function appendConstNTimeBands(im) {
              .copyProperties(im, ['system:time_start', 'year']);
 }
 
+// Calculate monthly means of all bands of images in a collection.
+// Sets a image property with number of bands -- can subsequently 
+// be used to filter out months with no data.
+// Used for data available at frequency greater than monthly 
+// input: image collection, list of years, list of months
+// output: image collection
+function monthwiseAggregate(coll, years, months) {
+  return ee.ImageCollection.fromImages(years.map(function(y) {
+    return months.map(function(m) {
+      var mOfyDate = ee.Date.fromYMD(y, m, 1);
+      var mOfyAggr = coll.filterDate(mOfyDate, mOfyDate.advance(1, 'month'))
+                         .mean();
+      return mOfyAggr.set('system:time_start', mOfyDate.millis(),
+                          'date', mOfyDate.format('YYYY-MM-dd'),
+                          'numBands', mOfyAggr.bandNames().length());
+    });
+  }).flatten());
+}
 
 // ------------------------- PROCESSING -------------------------------------
 
@@ -189,4 +207,106 @@ Export.image.toDrive({
   region: ugandaBuffered.bounds(), 
   scale: terraClimScl,
   crs: terraClimCRS
+});
+
+//////////////// GLDAS 2.1 ///////////////////////
+
+var gldas = ee.ImageCollection('NASA/GLDAS/V021/NOAH/G025/T3H')
+  .filter(ee.Filter.date('2000-01-01', '2018-12-31'))
+  .select(['AvgSurfT_inst', 'Evap_tavg', 'PotEvap_tavg', 'Qs_acc', 'Qsb_acc', 
+          'Rainf_f_tavg', 'RootMoist_inst', 'SoilMoi0_10cm_inst', 'Tveg_tavg']);
+var gldasCRS = ee.Image(gldas.first()).projection().crs().getInfo();
+var gldasScl = ee.Image(gldas.first()).projection().nominalScale().getInfo();
+
+// Years for which data are available
+var gldasYears = extractYears(gldas);
+// Months in a year
+var months = ee.List.sequence(1, 12);
+
+var gldasMonthly = monthwiseAggregate(gldas, gldasYears, months);
+
+// time series of composites
+var gldasTimeSeries = yearlyComposites(gldasYears, gldasMonthly)
+  .map(appendConstNTimeBands);
+
+var gldasPredVars = ee.Image(gldasTimeSeries.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+var gldasRespVars = ee.Image(gldasTimeSeries.first()).bandNames()
+  .slice(2);    // rest all are response vars
+
+// Perform regression. All response variables handled at once.
+var gldasRegr = gldasTimeSeries
+  .reduce(ee.Reducer.linearRegression(gldasPredVars.size(), gldasRespVars.size()))
+  .aside(print, 'gldas regression output');
+
+// Flatten regression result (coefficients) array image - band names
+var gldasRegrResBandNames = [gldasPredVars,  // 0-axis variation.
+                             gldasRespVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands,
+// in a multi-band image according to the labels
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var gldasRegrCoeffs = gldasRegr.select(['coefficients']).arrayFlatten(gldasRegrResBandNames)
+  .aside(print, 'gldasregression output flattened');
+
+// Export to drive
+Export.image.toDrive({
+  image: gldasRegrCoeffs.clip(ugandaBuffered),
+  description: 'UgandaGldasRegr',
+  fileNamePrefix: 'UgandaGldasRegr',
+  region: ugandaBuffered.bounds(), 
+  scale: gldasScl,
+  crs: gldasCRS
+});
+
+////////////// Ocean Color SMI ///////////////////
+
+var oceanSmi = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
+  .filter(ee.Filter.date('2003-01-01', '2018-12-31')) // the 16 full years data is available for
+  .select(['chlor_a', 'poc']); // sst not available
+
+var oceanSmiCRS = ee.Image(oceanSmi.first()).projection().crs().getInfo();
+var oceanSmiScl = ee.Image(oceanSmi.first()).projection().nominalScale().getInfo();
+
+// Years for which data are available
+var oceanSmiYears = extractYears(oceanSmi);
+// Months in a year
+var months = ee.List.sequence(1, 12);
+
+var oceanSmiMonthly = monthwiseAggregate(oceanSmi, oceanSmiYears, months);
+
+// time series of composites
+var oceanSmiTimeSeries = yearlyComposites(oceanSmiYears, oceanSmiMonthly)
+  .map(appendConstNTimeBands);
+
+var oceanSmiPredVars = ee.Image(oceanSmiTimeSeries.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+var oceanSmiRespVars = ee.Image(oceanSmiTimeSeries.first()).bandNames()
+  .slice(2);    // rest all are response vars
+
+// Perform regression. All response variables handled at once.
+var oceanSmiRegr = oceanSmiTimeSeries
+  .reduce(ee.Reducer.linearRegression(oceanSmiPredVars.size(), oceanSmiRespVars.size()))
+  .aside(print, 'oceanSmi regression output');
+
+// Flatten regression result (coefficients) array image - band names
+var oceanSmiRegrResBandNames = [oceanSmiPredVars,  // 0-axis variation.
+                                oceanSmiRespVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands,
+// in a multi-band image according to the labels
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var oceanSmiRegrCoeffs = oceanSmiRegr.select(['coefficients']).arrayFlatten(oceanSmiRegrResBandNames)
+  .aside(print, 'oceanSmiregression output flattened');
+
+// Export to drive
+Export.image.toDrive({
+  image: oceanSmiRegrCoeffs.clip(ugandaBuffered),
+  description: 'UgandaOceanSMIRegr',
+  fileNamePrefix: 'UgandaOceanSMIRegr',
+  region: ugandaBuffered.bounds(), 
+  scale: oceanSmiScl,
+  crs: oceanSmiCRS
 });
