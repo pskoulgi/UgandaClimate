@@ -98,6 +98,8 @@ var uganda = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
   .first();
 var ugandaBuffered = ee.Feature(uganda).buffer(3e5); // 300km buffer
 
+/////////////////// FLDAS ////////////////////////
+
 // Get relevant FLDAS data
 // More info:https://developers.google.com/earth-engine/datasets/catalog/NASA_FLDAS_NOAH01_C_GL_M_V001
 var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
@@ -106,60 +108,56 @@ var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
   // surface radiative temperature, near surface air temperature
   .select(['SoilMoi00_10cm_tavg', 'Qs_tavg', 'RadT_tavg', 'Tair_f_tavg']);
 
+var fldasCRS = ee.Image(fldas.first()).projection().crs().getInfo();
+var fldasScl = ee.Image(fldas.first()).projection().nominalScale().getInfo();
+
 // Years for which data are available
-var imYears = extractYears(fldas);
+var fldasYears = extractYears(fldas);
 
 // Create time series of composites
-var timeSeries = yearlyComposites(imYears, fldas)
-  .aside(print, 'yearly composites')
+var fldasTimeSeries = yearlyComposites(fldasYears, fldas)
   // add a constant and time band, in preparation of regression
-  .map(appendConstNTimeBands)
-  .aside(print, 'yearly composites, time & constant added');
+  .map(appendConstNTimeBands);
 
-var predVars = ee.Image(timeSeries.first()).bandNames()
+var fldasPredVars = ee.Image(fldasTimeSeries.first()).bandNames()
   .slice(0, 2); // constant, time are predictor vars
-var respVars = ee.Image(timeSeries.first()).bandNames()
+var fldasRespVars = ee.Image(fldasTimeSeries.first()).bandNames()
   .slice(2);    // rest all are response vars
 
 // Perform regression. All response variables handled at once.
-var temporalRegr = timeSeries.reduce(ee.Reducer.linearRegression(predVars.size(), respVars.size()))
-  .aside(print, 'regression output');
+var fldasRegr = fldasTimeSeries
+  .reduce(ee.Reducer.linearRegression(fldasPredVars.size(), fldasRespVars.size()));
 
 // Regression result (coefficients) is array image that must be flattened.
 // These lists label the information along each axis of the arrays.
 // From eg. at https://developers.google.com/earth-engine/reducers_regression
-var bandNames = [predVars,  // 0-axis variation.
-                 respVars]; // 1-axis variation.
+var fldasRegrResBandNames = [fldasPredVars,  // 0-axis variation.
+                             fldasRespVars]; // 1-axis variation.
 
 // Flatten the array images to get all coefficients as bands,
 // in a multi-band image according to the labels
 // "time_*" bands are the slopes of the regression
 // "constant_* bands are offsets of the regression
-var regrCoeffs = temporalRegr.select(['coefficients']).arrayFlatten(bandNames)
-  .aside(print, 'regression output flattened');
+var fldasRegrCoeffs = fldasRegr.select(['coefficients']).arrayFlatten(fldasRegrResBandNames)
+  .aside(print, 'fldas regression output flattened');
 
 // ------------------------- DISPLAY & EXPORT -----------------------------------
 
-// Displaying a coefficient image
-var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"], palette: ['red', 'grey', 'blue'],
-  "min":-54.47085296630859,"max":54};
-Map.addLayer(regrCoeffs.select('time_SoilMoi00_10cm_tavg_mean_djf').clip(ugandaBuffered),
-  visParam, 'time_SoilMoi00_10cm_tavg_mean_djf');
-Map.centerObject(ugandaBuffered);
-
-// Find CRS and nominal scale of original images
-print(ee.Image(fldas.first()).projection(), 'original projection');
-var expCRS = ee.Image(fldas.first()).projection().crs().getInfo();
-var expScl = ee.Image(fldas.first()).projection().nominalScale().getInfo();
+// // Displaying a coefficient image
+// var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"], palette: ['red', 'grey', 'blue'],
+//   "min":-54.47085296630859,"max":54};
+// Map.addLayer(fldasRegrCoeffs.select('time_SoilMoi00_10cm_tavg_mean_djf').clip(ugandaBuffered),
+//   visParam, 'time_SoilMoi00_10cm_tavg_mean_djf');
+// Map.centerObject(ugandaBuffered);
 
 // Export to drive
 Export.image.toDrive({
-  image: regrCoeffs.clip(ugandaBuffered),
+  image: fldasRegrCoeffs.clip(ugandaBuffered),
   description: 'UgandaClimVarsRegr',
   fileNamePrefix: 'UgandaClimVarsRegr',
   region: ugandaBuffered.bounds(), 
-  scale: expScl,
-  crs: expCRS
+  scale: fldasScl,
+  crs: fldasCRS
 });
 
 ////////////// Terra Climate ///////////////////
@@ -185,8 +183,7 @@ var terraClimRespVars = ee.Image(terraClimTimeSeries.first()).bandNames()
 
 // Perform regression. All response variables handled at once.
 var terraClimRegr = terraClimTimeSeries
-  .reduce(ee.Reducer.linearRegression(terraClimPredVars.size(), terraClimRespVars.size()))
-  .aside(print, 'terraClim regression output');
+  .reduce(ee.Reducer.linearRegression(terraClimPredVars.size(), terraClimRespVars.size()));
 
 // Flatten regression result (coefficients) array image - band names
 var terraClimRegrResBandNames = [terraClimPredVars,  // 0-axis variation.
@@ -236,8 +233,7 @@ var gldasRespVars = ee.Image(gldasTimeSeries.first()).bandNames()
 
 // Perform regression. All response variables handled at once.
 var gldasRegr = gldasTimeSeries
-  .reduce(ee.Reducer.linearRegression(gldasPredVars.size(), gldasRespVars.size()))
-  .aside(print, 'gldas regression output');
+  .reduce(ee.Reducer.linearRegression(gldasPredVars.size(), gldasRespVars.size()));
 
 // Flatten regression result (coefficients) array image - band names
 var gldasRegrResBandNames = [gldasPredVars,  // 0-axis variation.
@@ -248,7 +244,7 @@ var gldasRegrResBandNames = [gldasPredVars,  // 0-axis variation.
 // "time_*" bands are the slopes of the regression
 // "constant_* bands are offsets of the regression
 var gldasRegrCoeffs = gldasRegr.select(['coefficients']).arrayFlatten(gldasRegrResBandNames)
-  .aside(print, 'gldasregression output flattened');
+  .aside(print, 'gldas regression output flattened');
 
 // Export to drive
 Export.image.toDrive({
@@ -287,8 +283,7 @@ var oceanSmiRespVars = ee.Image(oceanSmiTimeSeries.first()).bandNames()
 
 // Perform regression. All response variables handled at once.
 var oceanSmiRegr = oceanSmiTimeSeries
-  .reduce(ee.Reducer.linearRegression(oceanSmiPredVars.size(), oceanSmiRespVars.size()))
-  .aside(print, 'oceanSmi regression output');
+  .reduce(ee.Reducer.linearRegression(oceanSmiPredVars.size(), oceanSmiRespVars.size()));
 
 // Flatten regression result (coefficients) array image - band names
 var oceanSmiRegrResBandNames = [oceanSmiPredVars,  // 0-axis variation.
@@ -299,7 +294,7 @@ var oceanSmiRegrResBandNames = [oceanSmiPredVars,  // 0-axis variation.
 // "time_*" bands are the slopes of the regression
 // "constant_* bands are offsets of the regression
 var oceanSmiRegrCoeffs = oceanSmiRegr.select(['coefficients']).arrayFlatten(oceanSmiRegrResBandNames)
-  .aside(print, 'oceanSmiregression output flattened');
+  .aside(print, 'oceanSmi regression output flattened');
 
 // Export to drive
 Export.image.toDrive({
