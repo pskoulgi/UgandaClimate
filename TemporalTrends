@@ -141,8 +141,6 @@ var fldasRegrResBandNames = [fldasPredVars,  // 0-axis variation.
 var fldasRegrCoeffs = fldasRegr.select(['coefficients']).arrayFlatten(fldasRegrResBandNames)
   .aside(print, 'fldas regression output flattened');
 
-// ------------------------- DISPLAY & EXPORT -----------------------------------
-
 // // Displaying a coefficient image
 // var visParam = {"opacity":1,"bands":["time_SoilMoi00_10cm_tavg_mean_djf"], palette: ['red', 'grey', 'blue'],
 //   "min":-54.47085296630859,"max":54};
