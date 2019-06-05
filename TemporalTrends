@@ -106,7 +106,7 @@ var fldas = ee.ImageCollection('NASA/FLDAS/NOAH01/C/GL/M/V001')
   .filter(ee.Filter.date('1982-01-01', '2018-12-31')) // 2019 is not yet complete
   // Select soil surface moisture, surface runoff, 
   // surface radiative temperature, near surface air temperature
-  .select(['SoilMoi00_10cm_tavg', 'Qs_tavg', 'RadT_tavg', 'Tair_f_tavg']);
+  .select(['SoilMoi00_10cm_tavg', 'Qs_tavg', 'RadT_tavg', 'Tair_f_tavg', 'Rainf_f_tavg']);
 
 var fldasCRS = ee.Image(fldas.first()).projection().crs().getInfo();
 var fldasScl = ee.Image(fldas.first()).projection().nominalScale().getInfo();
@@ -151,8 +151,8 @@ var fldasRegrCoeffs = fldasRegr.select(['coefficients']).arrayFlatten(fldasRegrR
 // Export to drive
 Export.image.toDrive({
   image: fldasRegrCoeffs.clip(ugandaBuffered),
-  description: 'UgandaClimVarsRegr',
-  fileNamePrefix: 'UgandaClimVarsRegr',
+  description: 'UgandaFldasRegr',
+  fileNamePrefix: 'UgandaFldasRegr',
   region: ugandaBuffered.bounds(), 
   scale: fldasScl,
   crs: fldasCRS
