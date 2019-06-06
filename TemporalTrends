@@ -303,3 +303,53 @@ Export.image.toDrive({
   scale: oceanSmiScl,
   crs: oceanSmiCRS
 });
+
+/////////////////// CHIRPS /////////////////////////
+
+var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
+  .filter(ee.Filter.date('1981-01-01', '2018-12-31'))
+  .select(['precipitation'], ['precip']); // rename band to a shorter name
+
+var chirpsCRS = ee.Image(chirps.first()).projection().crs().getInfo();
+var chirpsScl = ee.Image(chirps.first()).projection().nominalScale().getInfo();
+
+// Years for which data are available
+var chirpsYears = extractYears(chirps);
+// Months in a year
+var months = ee.List.sequence(1, 12);
+
+var chirpsMonthly = monthwiseAggregate(chirps, chirpsYears, months);
+
+// time series of composites
+var chirpsTimeSeries = yearlyComposites(chirpsYears, chirpsMonthly)
+  .map(appendConstNTimeBands);
+
+var chirpsPredVars = ee.Image(chirpsTimeSeries.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+var chirpsRespVars = ee.Image(chirpsTimeSeries.first()).bandNames()
+  .slice(2);    // rest all are response vars
+
+// Perform regression. All response variables handled at once.
+var chirpsRegr = chirpsTimeSeries
+  .reduce(ee.Reducer.linearRegression(chirpsPredVars.size(), chirpsRespVars.size()));
+
+// Flatten regression result (coefficients) array image - band names
+var chirpsRegrResBandNames = [chirpsPredVars,  // 0-axis variation.
+                                chirpsRespVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands,
+// in a multi-band image according to the labels
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var chirpsRegrCoeffs = chirpsRegr.select(['coefficients']).arrayFlatten(chirpsRegrResBandNames)
+  .aside(print, 'chirps regression output flattened');
+
+// Export to drive
+Export.image.toDrive({
+  image: chirpsRegrCoeffs.clip(ugandaBuffered),
+  description: 'UgandaChirpsRegr',
+  fileNamePrefix: 'UgandaChirpsRegr',
+  region: ugandaBuffered.bounds(), 
+  scale: chirpsScl,
+  crs: chirpsCRS
+});
