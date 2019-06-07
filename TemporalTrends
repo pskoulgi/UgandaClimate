@@ -268,6 +268,14 @@ Export.image.toDrive({
   crs: gldasCRS
 });
 
+// // Export band names as a CSV
+// var n = gldasRegrCoeffs.bandNames()
+//   .zip(ee.List.sequence({start: 0, count: gldasRegrCoeffs.bandNames().length()}));
+// var namesfc = ee.FeatureCollection(n.map(function(l) {
+//   return ee.Feature(null, {bandnum: ee.List(l).get(1), bandname: ee.List(l).get(0)});
+// }));
+// Export.table.toDrive({collection: namesfc, selectors: ['bandnum', 'bandname']});
+
 ////////////// Ocean Color SMI ///////////////////
 
 var oceanSmi = ee.ImageCollection('NASA/OCEANDATA/MODIS-Aqua/L3SMI')
