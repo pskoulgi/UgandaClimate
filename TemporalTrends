@@ -41,7 +41,17 @@ function yearlyComposites(years, coll) {
     var son_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 10, 1), 'son');
     var ond_comps = seasonalComposites(coll, ee.Date.fromYMD(y, 11, 1), 'ond');
     
-    return ee.Image.cat(djf_comps, mam_comps, jja_comps, son_comps, ond_comps)
+    // annual composites
+    var yDate = ee.Date.fromYMD(y, 1, 1);
+    var annual = coll.filter(ee.Filter.date(yDate, yDate.advance(1, 'year')));
+    var annual_mean = appendSeasonTag(annual.reduce(ee.Reducer.mean()), 'annual');
+    var annual_max  = appendSeasonTag(annual.reduce(ee.Reducer.max()),  'annual');
+    var annual_min  = appendSeasonTag(annual.reduce(ee.Reducer.min()),  'annual');
+    var annual_maxMinusMin = appendSeasonTag(annual.max().subtract(annual.min()),
+                                             'maxMinusMin_'+'annual');
+    var annual_comps = ee.Image.cat(annual_mean, annual_max, annual_min, annual_maxMinusMin);
+    
+    return ee.Image.cat(djf_comps, mam_comps, jja_comps, son_comps, ond_comps, annual_comps)
              .set('system:time_start', ee.Date.fromYMD(y, 1, 1).millis(),
                   'year', y);
   }));
