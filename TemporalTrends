@@ -70,23 +70,29 @@ function appendConstNTimeBands(im) {
              .copyProperties(im, ['system:time_start', 'year']);
 }
 
-// Calculate monthly means of all bands of images in a collection.
+// Calculate daily means of all bands of images in a collection.
 // Sets a image property with number of bands -- can subsequently 
-// be used to filter out months with no data.
+// be used to filter out images with no data.
 // Used for data available at frequency greater than monthly 
-// input: image collection, list of years, list of months
+// input: image collection, list of years
 // output: image collection
-function monthwiseAggregate(coll, years, months) {
-  return ee.ImageCollection.fromImages(years.map(function(y) {
-    return months.map(function(m) {
-      var mOfyDate = ee.Date.fromYMD(y, m, 1);
-      var mOfyAggr = coll.filterDate(mOfyDate, mOfyDate.advance(1, 'month'))
-                         .mean();
-      return mOfyAggr.set('system:time_start', mOfyDate.millis(),
-                          'date', mOfyDate.format('YYYY-MM-dd'),
-                          'numBands', mOfyAggr.bandNames().length());
-    });
-  }).flatten());
+function dailyAggregate(coll, years) {
+  return ee.ImageCollection.fromImages(ee.List(years).map(function(y) {
+    var yDate = ee.Date.fromYMD(y, 1, 1);
+    // find number of days in year y
+    var yNumDays = yDate.advance(1, 'year').difference(yDate, 'day');
+    // aggregate for each day of year
+    return ee.List.sequence({start: 0, count: yNumDays})
+      .map(function(doy) {
+        var doyDate = yDate.advance(doy, 'day');
+        var doyAggr = coll.filterDate(doyDate, doyDate.advance(1, 'day'))
+                          .mean();
+        return doyAggr.set('system:time_start', doyDate.millis(),
+                            'date', doyDate.format('YYYY-MM-dd'),
+                            'numBands', doyAggr.bandNames().length());
+      });
+  }).flatten())
+  .filter(ee.Filter.neq('numBands', 0)); // drop days with no data
 }
 
 // ------------------------- PROCESSING -------------------------------------
@@ -215,13 +221,11 @@ var gldasScl = ee.Image(gldas.first()).projection().nominalScale().getInfo();
 
 // Years for which data are available
 var gldasYears = extractYears(gldas);
-// Months in a year
-var months = ee.List.sequence(1, 12);
 
-var gldasMonthly = monthwiseAggregate(gldas, gldasYears, months);
+var gldasDaily = dailyAggregate(gldas, gldasYears);
 
 // time series of composites
-var gldasTimeSeries = yearlyComposites(gldasYears, gldasMonthly)
+var gldasTimeSeries = yearlyComposites(gldasYears, gldasDaily)
   .map(appendConstNTimeBands);
 
 var gldasPredVars = ee.Image(gldasTimeSeries.first()).bandNames()
@@ -265,13 +269,11 @@ var oceanSmiScl = ee.Image(oceanSmi.first()).projection().nominalScale().getInfo
 
 // Years for which data are available
 var oceanSmiYears = extractYears(oceanSmi);
-// Months in a year
-var months = ee.List.sequence(1, 12);
 
-var oceanSmiMonthly = monthwiseAggregate(oceanSmi, oceanSmiYears, months);
+var oceanSmiDaily = dailyAggregate(oceanSmi, oceanSmiYears);
 
 // time series of composites
-var oceanSmiTimeSeries = yearlyComposites(oceanSmiYears, oceanSmiMonthly)
+var oceanSmiTimeSeries = yearlyComposites(oceanSmiYears, oceanSmiDaily)
   .map(appendConstNTimeBands);
 
 var oceanSmiPredVars = ee.Image(oceanSmiTimeSeries.first()).bandNames()
@@ -315,13 +317,9 @@ var chirpsScl = ee.Image(chirps.first()).projection().nominalScale().getInfo();
 
 // Years for which data are available
 var chirpsYears = extractYears(chirps);
-// Months in a year
-var months = ee.List.sequence(1, 12);
-
-var chirpsMonthly = monthwiseAggregate(chirps, chirpsYears, months);
 
 // time series of composites
-var chirpsTimeSeries = yearlyComposites(chirpsYears, chirpsMonthly)
+var chirpsTimeSeries = yearlyComposites(chirpsYears, chirps)
   .map(appendConstNTimeBands);
 
 var chirpsPredVars = ee.Image(chirpsTimeSeries.first()).bandNames()
@@ -335,7 +333,7 @@ var chirpsRegr = chirpsTimeSeries
 
 // Flatten regression result (coefficients) array image - band names
 var chirpsRegrResBandNames = [chirpsPredVars,  // 0-axis variation.
-                                chirpsRespVars]; // 1-axis variation.
+                              chirpsRespVars]; // 1-axis variation.
 
 // Flatten the array images to get all coefficients as bands,
 // in a multi-band image according to the labels
