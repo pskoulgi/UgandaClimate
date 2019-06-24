@@ -105,6 +105,37 @@ function dailyAggregate(coll, years) {
   .filter(ee.Filter.neq('numBands', 0)); // drop days with no data
 }
 
+// // Reorganize images in NEX collection to give one image per day
+// // where all model/scenario images of that day are bands of the output image
+// // input: image collection, start date, end date
+// // output: image collection
+// function dailyModelOpsReorg(coll, startDate, endDate) {
+//   // find number of days in collection
+//   var numDays = endDate.difference(startDate, 'day');
+//   return ee.ImageCollection.fromImages(ee.List.sequence({start: 0, count: numDays})
+//     // rearrange model/scenario output images of each day into bands of an image for that day
+//     .map(function(d) {
+//       var dDate = startDate.advance(d, 'day');
+//       var dIm = coll.filterDate(dDate, dDate.advance(1, 'day'))
+//                     .toBands();
+//       var dImBands = dIm.bandNames();
+//       var dImNewBands = dImBands.map(function(n) {
+//         var chunks = ee.String(n).split('_');
+//         return ee.String(chunks.get(0))
+//                 .cat('_')
+//                 .cat(ee.String(chunks.get(1)))
+//                 .cat('_')
+//                 .cat(ee.String(chunks.get(3)));
+//       });
+//       return dIm.select(dImBands, dImNewBands)
+//                 .set('system:time_start', dDate.millis(),
+//                     'date', dDate.format('YYYY-MM-dd'),
+//                     'numBands', dImBands.size());
+//     }))
+//     // drop days without the full set of scenarios, models, bands (eg. feb 29 of leap years)
+//     .filter(ee.Filter.eq('numBands', 2*21*3));
+// }
+
 // ------------------------- PROCESSING -------------------------------------
 
 // Find Uganda boundary and add buffer
@@ -369,3 +400,59 @@ Export.image.toDrive({
   scale: chirpsScl,
   crs: chirpsCRS
 });
+
+// /////////////////// NEX-GDDP /////////////////////////
+// Historical: giving internal error. strange, because it runs on the old (tested) functions
+// Prospective: giving internal error. uses now dailyreorg function. not sure what kink in 
+//              dataset is giving the error. (detected issue of feb 29th not having all models, for eg.)
+
+// var nex = ee.ImageCollection("NASA/NEX-GDDP");
+
+// var nexCRS = ee.Image(nex.first()).projection().crs().getInfo();
+// var nexScl = ee.Image(nex.first()).projection().nominalScale().getInfo();
+
+// // Dates of historical & prospective epoch start and end
+// var historicalStart  = ee.Date('1986-01-01');
+// var historicalEnd    = ee.Date('2005-12-31');
+// var prospectiveStart = ee.Date('2041-01-01');
+// var prospectiveEnd   = ee.Date('2060-12-31');
+
+// // Historical
+// var historical = nex.filter(ee.Filter.date(historicalStart, historicalEnd))
+//   .filter(ee.Filter.eq('scenario', 'historical'));
+// // Years for which data are available
+// var historicalYears = extractYears(historical);
+// // time series of composites
+// var historicalTimeSeries = yearlyComposites(historicalYears, historical);
+// // calculate mean over epoch at each pixel
+// var historicalEpochMeans = historicalTimeSeries.mean().aside(print, 'NEX historical means');
+
+// // Prospective
+// var prospective = nex.filter(ee.Filter.date(prospectiveStart, prospectiveEnd));
+// var prospectiveYears = extractYears(prospective);
+// var prospectiveTimeSeries = yearlyComposites(prospectiveYears, 
+//                                             // organize images such that there is one image a day.
+//                                             // all models & scenarios of that day become bands of 
+//                                             // the image for that day
+//                                             dailyModelOpsReorg(prospective, 
+//                                                                 prospectiveStart,
+//                                                                 prospectiveEnd));
+// var prospectiveEpochMeans = prospectiveTimeSeries.mean().aside(print, 'NEX prospective means');
+
+// // Export to drive
+// Export.image.toDrive({
+//   image: prospectiveEpochMeans.clip(ugandaBuffered),
+//   description: 'UgandaNexProspectiveEpochMean',
+//   fileNamePrefix: 'UgandaNexProspectiveEpochMean',
+//   region: ugandaBuffered.bounds(), 
+//   scale: nexScl,
+//   crs: nexCRS
+// });
+// Export.image.toDrive({
+//   image: historicalEpochMeans.clip(ugandaBuffered),
+//   description: 'UgandaNexHistoricalEpochMean',
+//   fileNamePrefix: 'UgandaNexHistoricalEpochMean',
+//   region: ugandaBuffered.bounds(), 
+//   scale: nexScl,
+//   crs: nexCRS
+// });
