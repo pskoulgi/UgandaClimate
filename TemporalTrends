@@ -405,6 +405,7 @@ Export.image.toDrive({
 // Historical: giving internal error. strange, because it runs on the old (tested) functions
 // Prospective: giving internal error. uses now dailyreorg function. not sure what kink in 
 //              dataset is giving the error. (detected issue of feb 29th not having all models, for eg.)
+//              Also, there'll be 21*2*3*24 = 3024 bands in the output! Is that too many?
 
 // var nex = ee.ImageCollection("NASA/NEX-GDDP");
 
