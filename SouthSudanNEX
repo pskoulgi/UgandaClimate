@@ -1,0 +1,163 @@
+////////////////////// DEFINITIONS ///////////////////////////////
+
+// Define season of interest.
+// Using #month in a year, specify start and duration of the season.
+// Eg. season MJJAS starts in month 5 (May) and lasts 5 months (inclusive of Sep).
+// Eg. season ONDJFMA starts in month 10 (Oct) and lasts 7 months going into next calendar year
+var seasonStart = 10; // eg. 1 for January, 6 for June
+var seasonDur   = 7;  // eg. 3 for three months-long season starting seasonStart (inclusive)
+
+// Define period of analysis, with start and end date (in YYYY-MM-DD format)
+var dateStart = '2020-01-01';
+var dateStop  = '2050-12-31';
+
+// Run one band at a time, select it here. One of 'pr', 'tasmin', 'tasmax'.
+// Note: units are kg/(m^2*s), K, K, respectively
+var bandOfInterest = 'pr';
+
+var timeAxisScaling = 1000 * 60 * 60 * 24 * 365; // for fractional years
+
+print('A task should be fired up.');
+print('This can be slow, please wait.');
+
+/////////////////// NO NEED TO TWEAK AFTER THIS //////////////////
+
+/////////////////////// Read in the dataset ///////////////////////////
+
+var nex = ee.ImageCollection('NASA/NEX-GDDP')
+  .select(bandOfInterest)
+  .filter(ee.Filter.date(dateStart, dateStop))//.aside(print)
+  // set new properties to help with later joins and filtering/aggregation
+  .map(function(im) {
+    return im.set('date', im.date().format('yyyy-MM-dd'),
+                  'year', im.date().get('year'));
+  });
+
+///////// Calculate average of all model outputs for each day /////////
+
+// Generate lists of images from the same day using a join.
+var nexDailyJoin = ee.Join.saveAll('same_day').apply({
+  primary: nex.distinct('date'),
+  secondary: nex,
+  condition: ee.Filter.equals({leftField: 'date', rightField: 'date'})
+});
+// print('Each day associated with its scenarios and model outputs to be averaged', nexDailyJoin);
+
+// Compute daily model averages.
+// Each variable is averaged for rcp45 and rcp85 separately
+var dailyModelAvg = nexDailyJoin.map(function(im) {
+  var dayCol = ee.ImageCollection.fromImages(im.get('same_day'));
+  
+  // Scenario-wise averaging of each variable
+  var scen = 'rcp45';
+  var rcp45ModAvg = dayCol.filterMetadata('scenario', 'equals', scen)
+    .mean()
+    // Add scenario suffix to band names
+    .rename(bandOfInterest + '_' + scen + 'dailyModAvg');
+  scen = 'rcp85';
+  var rcp85ModAvg = dayCol.filterMetadata('scenario', 'equals', scen)
+    .mean()
+    // Add scenario suffix to band names
+    .rename(bandOfInterest + '_' + scen + 'dailyModAvg');
+    
+  // Find daterange for the season corresponding to im's year.
+  // Note that all im's of a year will have the same daterange.
+  // To be used in join in next step for finding each year's seasonal aggregate/avg.
+  // See for toy example https://code.earthengine.google.com/05774d75bbd4e432ee5b5793ca086357
+  var imYearSeasonStart = ee.Date.fromYMD(im.getNumber('year'), seasonStart, 1);
+  var imDateRange = ee.DateRange({
+    start: imYearSeasonStart, 
+    end: imYearSeasonStart.advance(seasonDur, 'month')
+  });
+  
+  return ee.Image.cat(rcp45ModAvg, rcp85ModAvg)
+    .copyProperties(im, ['date', 'year', 'system:time_start'])
+    .set('seasonDateRange', imDateRange);
+});
+// print('Each day\'s model outputs averaged, by scenario', dailyModelAvg);
+
+//////// Calculate aggregates for chosen season for each year //////////
+
+// Generate lists of images from the same year using a join.
+// See for toy example https://code.earthengine.google.com/05774d75bbd4e432ee5b5793ca086357
+var yearlySeasonJoin = ee.Join.saveAll('season_of_year').apply({
+  primary: dailyModelAvg.distinct('year'),
+  secondary: dailyModelAvg,
+  condition: ee.Filter.dateRangeContains({
+    leftField: 'seasonDateRange',
+    rightField: 'system:time_start'
+  })
+});
+// print(yearlySeasonJoin, 'Each year associated with its season to be aggregated/averaged over');
+
+// Calculate average over the season for each year
+var yearlySeasAvgRegrPrep = yearlySeasonJoin.map(function(im) {
+  // Calculate average for the year
+  var yearlyCol = ee.ImageCollection.fromImages(im.get('season_of_year'));
+  var yearlyMean = yearlyCol.mean();
+  
+  // Combine constant and time bands in prep for regression
+  var seasTimeStamp = ee.DateRange(im.get('seasonDateRange')).start();
+  var regrPrep = ee.Image(1).float() // to keep band data types consistent
+    .addBands(ee.Image(seasTimeStamp.millis()).rename('time')
+                .divide(timeAxisScaling)
+                .float()) // to keep band data types consistent
+    .addBands(yearlyMean)
+    .copyProperties(im, ['year', 'seasonDateRange'])
+    // Set a property with human readable timestamp of the image, for sanity check
+    .set('system:time_start', seasTimeStamp.millis(),
+         'timestamp', seasTimeStamp.format('yyyy-MM-dd'));
+  
+  return regrPrep;
+});
+// print(yearlySeasAvgRegrPrep, 'Each year\'s season values averaged, by scenario');
+
+/////////// Perform regression of all variables with time //////////////
+
+// Define predictor and response variables.
+var nexgddpPredVars = ee.Image(yearlySeasAvgRegrPrep.first()).bandNames()
+  .slice(0, 2); // constant, time are predictor vars
+// print(nexgddpPredVars, 'Regression predictor vars');
+var nexgddpRespVars = ee.Image(yearlySeasAvgRegrPrep.first()).bandNames()
+  .slice(2);    // rest all are response vars
+// print(nexgddpRespVars, 'Regression response vars');
+
+// Perform regression. All response variables handled at once.
+var nexgddpRegr = ee.ImageCollection(yearlySeasAvgRegrPrep)
+  .reduce(ee.Reducer.linearRegression(nexgddpPredVars.size(), nexgddpRespVars.size()));
+
+// Flatten regression result (coefficients) array image - band names.
+var nexgddpRegrResBandNames = [nexgddpPredVars,  // 0-axis variation.
+                               nexgddpRespVars]; // 1-axis variation.
+
+// Flatten the array images to get all coefficients as bands 
+// in a multi-band image according to the labels.
+// "time_*" bands are the slopes of the regression
+// "constant_* bands are offsets of the regression
+var nexgddpRegrCoeffs = nexgddpRegr.select(['coefficients']).arrayFlatten(nexgddpRegrResBandNames);
+// print(nexgddpRegrCoeffs, 'nexgddpregression output flattened');
+
+////////////////// Export regression result to drive ////////////////////
+
+// Define area of interest
+var ssd = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+  .filter(ee.Filter.eq('country_co', 'OD'))
+  .first();
+var ssdBuffered = ee.Feature(ssd).buffer(1e4) // 10km buffer
+  .aside(Map.addLayer, {}, 'SSD with 10km buff')
+  .aside(Map.centerObject, 5);
+
+// Get NEX source data CRS and scale, to export in the same
+var nexgddpCRS = ee.Image(nex.first()).projection().crs().getInfo();
+var nexgddpScl = ee.Image(nex.first()).projection().nominalScale().getInfo();
+
+// Export
+Export.image.toDrive({
+  image: nexgddpRegrCoeffs.clip(ssdBuffered),
+  region: ssdBuffered,
+  // folder: 'EE/SouthSudan',
+  description: 'SSD-NEX-GDDP-SeasonalRegr_' + bandOfInterest,
+  fileNamePrefix: 'SSD-NEX-GDDP-SeasonalRegr_' + bandOfInterest,
+  scale: nexgddpScl,
+  crs: nexgddpCRS
+});
