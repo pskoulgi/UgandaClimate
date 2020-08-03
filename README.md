@@ -9,3 +9,5 @@ The datasets used are:
 * [CHIRPS (daily)](https://developers.google.com/earth-engine/datasets/catalog/UCSB-CHG_CHIRPS_DAILY)
 * [MODIS ocean colour SMI](https://developers.google.com/earth-engine/datasets/catalog/NASA_OCEANDATA_MODIS-Aqua_L3SMI)
 * [NEX-GDDP](https://developers.google.com/earth-engine/datasets/catalog/NASA_NEX-GDDP)
+
+This work is shared, with permission, on a [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/) basis. Thanks Dr. Bhalla!
