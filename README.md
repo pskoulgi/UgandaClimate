@@ -1,6 +1,6 @@
 This repository contains my Google Earth Engine code to analyse past and future climate trends using a battery of biophysical measures from public datasets. Annual and seasonal trends are calculated separately.
 
-This was my work as part of climate analysis towards Green Climate Fund (GCF) and Global Environment Facility (GEF) proposals for Uganda and South Sudan, led by [Dr. R.S. Bhalla](www.feralindia.org/user/75), team leader for United Nations Development Program (UNDP) consultant team.
+This was my work as part of climate analysis towards Green Climate Fund (GCF) and Global Environment Facility (GEF) proposals for Uganda and South Sudan, led by [Dr. R.S. Bhalla](www.feralindia.org/user/75), team leader for United Nations Development Program (UNDP) consultant team. See [here](https://gitlab.com/rsbhalla/beucips) and [here](https://gitlab.com/rsbhalla/wacral) for repos on additional analysis this work was part of.
 
 The datasets used are:
 * [FLDAS](https://developers.google.com/earth-engine/datasets/catalog/NASA_FLDAS_NOAH01_C_GL_M_V001)
